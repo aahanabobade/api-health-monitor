@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>API Health Monitor</title>
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    font-family: 'Roboto', 'Inter', 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #1c1c1c, #3a3a3a);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #111;
+  }
+
+  .card {
+    background: linear-gradient(180deg, #ffffff, #f5f5f5);
+    width: 500px;
+    padding: 28px;
+    border-radius: 14px;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    animation: fadeInUp 0.6s ease-out;
+    position: relative;
+  }
+
+  @keyframes fadeInUp { from {opacity:0; transform:translateY(15px);} to {opacity:1; transform:translateY(0);} }
+  h2 { text-align:center; margin-bottom: 16px; font-weight:700; font-size:24px; color:#111; }
+
+  input, textarea, button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    border:1px solid #ccc;
+    margin-top: 10px;
+    font-family:'Roboto','Inter',sans-serif;
+    box-sizing:border-box;
+  }
+  input:focus, textarea:focus { outline:none; border-color:#111; }
+
+  /* Mode buttons */
+  .mode-buttons {
+    display:flex; gap:10px; width:100%; margin-bottom:10px;
+  }
+  .mode-buttons button {
+    flex:1;
+    background: linear-gradient(90deg,#111,#555);
+    color:#fff;
+    border:none;
+    cursor:pointer;
+    font-weight:500;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .mode-buttons button.active { opacity:1; }
+  .mode-buttons button.inactive { opacity:0.7; }
+  .mode-buttons button:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgba(0,0,0,0.25); }
+
+  button.check-btn {
+    background: linear-gradient(90deg,#111,#555);
+    color:#fff;
+    border:none;
+    cursor:pointer;
+    font-weight:500;
+    margin-top:10px;
+  }
+  button.check-btn:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgba(0,0,0,0.25); }
+
+  .result {
+    margin-top:20px;
+    padding:14px;
+    border-radius:10px;
+    font-size:14px;
+    width:100%;
+    display:none;
+    background-color:#111;
+    position:relative;
+    white-space:pre-wrap;
+    word-wrap:break-word;
+    animation: fadeIn 0.3s ease-in;
+  }
+  .result pre { margin:0; font-family:'Roboto', monospace; color:inherit; }
+
+  .copy-btn {
+    position:absolute;
+    top:6px;
+    right:6px;
+    background:#333;
+    color:#fff;
+    border:none;
+    border-radius:4px;
+    padding:2px 4px;
+    font-size:12px;
+    cursor:pointer;
+    opacity:0.8;
+    width:auto;
+    min-width:30px;
+    text-align:center;
+  }
+  .copy-btn:hover { opacity:1; }
+
+  /* Autocomplete dropdown */
+  .autocomplete-items {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border:1px solid #ccc;
+    border-radius:8px;
+    z-index:99;
+    max-height:150px;
+    overflow-y:auto;
+  }
+  .autocomplete-items div {
+    padding:10px;
+    cursor:pointer;
+  }
+  .autocomplete-items div:hover, .autocomplete-active {
+    background-color:#e0e0e0;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>API Health Monitor</h2>
+
+  <!-- Mode buttons -->
+  <div class="mode-buttons">
+    <button id="singleBtn" class="active" onclick="switchMode('single')">Single API</button>
+    <button id="bulkBtn" class="inactive" onclick="switchMode('bulk')">Bulk APIs</button>
+  </div>
+
+  <!-- Single input -->
+  <div style="position:relative; width:100%;" id="singleInputWrapper">
+    <input id="urlInput" placeholder="Type API name..." autocomplete="off" 
+       oninput="showSuggestions()" onkeydown="handleKeyDown(event)" />
+<div id="autocomplete-list" class="autocomplete-items"></div>
+  </div>
+
+  <!-- Bulk input -->
+  <textarea id="bulkInput" placeholder="Enter multiple URLs, one per line" style="display:none;"></textarea>
+
+  <button class="check-btn" onclick="checkHealth()">Check Health</button>
+
+  <div class="result" id="output">
+    <button class="copy-btn" onclick="copyOutput()">📋</button>
+  </div>
+</div>
+
+<script>
+// Live search URLs saved in browser
+let savedUrls = JSON.parse(localStorage.getItem('checkedUrls') || '[]');
+let mode = 'single';
+let currentFocus = -1;
+
+// Mode toggle
+function switchMode(selected){
+  mode = selected;
+  document.getElementById("singleInputWrapper").style.display = mode==='single'?'block':'none';
+  document.getElementById("bulkInput").style.display = mode==='bulk'?'block':'none';
+  document.getElementById("singleBtn").className = mode==='single'?"active":"inactive";
+  document.getElementById("bulkBtn").className = mode==='bulk'?"active":"inactive";
+}
+
+// Show live suggestions
+async function showSuggestions() {
+  const input = document.getElementById("urlInput");
+  const list = document.getElementById("autocomplete-list");
+  const val = input.value.trim();
+  list.innerHTML = "";
+  if(!val) return;
+
+  try {
+    // Fetch live suggestions from backend
+    const res = await fetch(`/suggest?query=${encodeURIComponent(val)}`);
+    const suggestions = await res.json(); // must return array of URLs
+
+    suggestions.slice(0, 5).forEach(url => {
+      const div = document.createElement("div");
+      div.textContent = url;
+      div.onclick = () => {
+        input.value = url;
+        list.innerHTML = "";
+      };
+      list.appendChild(div);
+    });
+    currentFocus = -1;
+  } catch(err) {
+    console.error(err);
+  }
+}
+
+function handleKeyDown(e){
+  const list = document.getElementById("autocomplete-list");
+  let items = list.getElementsByTagName("div");
+  if(e.key==="ArrowDown"){ currentFocus++; addActive(items); }
+  else if(e.key==="ArrowUp"){ currentFocus--; addActive(items); }
+  else if(e.key==="Enter"){ e.preventDefault(); if(currentFocus>-1 && items[currentFocus]) items[currentFocus].click(); }
+}
+
+function addActive(items){
+  if(!items) return;
+  removeActive(items);
+  if(currentFocus >= items.length) currentFocus = 0;
+  if(currentFocus < 0) currentFocus = items.length-1;
+  items[currentFocus].classList.add("autocomplete-active");
+}
+
+function removeActive(items){
+  for(let i=0;i<items.length;i++) items[i].classList.remove("autocomplete-active");
+}
+
+document.addEventListener("click", function(e){
+  if(e.target!==document.getElementById("urlInput")) document.getElementById("autocomplete-list").innerHTML="";
+});
+
+// Save URL to localStorage after health check
+function saveUrl(url){
+  if(!url) return;
+  if(!savedUrls.includes(url)) {
+    savedUrls.unshift(url);
+    if(savedUrls.length>50) savedUrls.pop(); // limit
+    localStorage.setItem('checkedUrls', JSON.stringify(savedUrls));
+  }
+}
+
+// Check health
+async function checkHealth(){
+  const output = document.getElementById("output");
+  output.style.display="block";
+  output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>Checking...`;
+  output.style.color="#fff";
+
+  if(mode==='single'){
+    const url=document.getElementById("urlInput").value.trim();
+    if(!url){ output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>Please enter a URL`; return; }
+    saveUrl(url);
+    try{
+      const res=await fetch(`/health?url=${encodeURIComponent(url)}`);
+      const data=await res.json();
+      output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>`;
+      const statusLine=`Status: ${data.status} ${data.status==='UP'?'✅':'❌'}`;
+      const codeLine=data.status_code?`Status Code: ${data.status_code}`:"";
+      const timeLine=data.response_time_ms?`Response Time: ${data.response_time_ms} ms`:"";
+      const attemptsLine=data.attempts?`Attempts: ${data.attempts}`:"";
+      const errorLine=data.error?`Error: ${data.error}`:"";
+      const resultText=[statusLine,codeLine,timeLine,attemptsLine,errorLine].filter(l=>l).join("\n");
+      const pre=document.createElement("pre"); pre.textContent=resultText;
+      pre.style.color=data.status==='UP'?"#22c55e":"#ef4444";
+      output.appendChild(pre);
+    } catch(err){
+      output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>Error connecting to backend`;
+      output.style.color="#ef4444";
+    }
+  } else { // Bulk
+    const urls=document.getElementById("bulkInput").value.trim().split("\n").filter(l=>l);
+    if(urls.length===0){ output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>Please enter URLs`; return; }
+    try{
+      const res=await fetch(`/health/bulk`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(urls)
+      });
+      const data=await res.json();
+      output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>`;
+      data.results.forEach(r=>{
+        const statusLine=`Status: ${r.status} ${r.status==='UP'?'✅':'❌'}`;
+        const codeLine=r.status_code?`Status Code: ${r.status_code}`:"";
+        const timeLine=r.response_time_ms?`Response Time: ${r.response_time_ms} ms`:"";
+        const errorLine=r.error?`Error: ${r.error}`:"";
+        const resultText=[statusLine,codeLine,timeLine,errorLine].filter(l=>l).join("\n");
+        const pre=document.createElement("pre"); pre.textContent=resultText;
+        pre.style.color=r.status==='UP'?"#22c55e":"#ef4444";
+        output.appendChild(pre);
+      });
+    } catch(err){
+      output.innerHTML=`<button class="copy-btn" onclick="copyOutput()">📋</button>Error connecting to backend`;
+      output.style.color="#ef4444";
+    }
+  }
+}
+
+// Copy result
+function copyOutput(){
+  const outputDiv=document.getElementById("output");
+  const text=Array.from(outputDiv.querySelectorAll("pre")).map(p=>p.innerText).join("\n\n");
+  navigator.clipboard.writeText(text).then(()=>alert("Copied to clipboard!"));
+}
+
+switchMode('single'); // initialize
+</script>
+</body>
+</html>
